@@ -15,12 +15,9 @@
     "eslint": "^1.7.3",
     "eslint-config-exhibit": "^2.0.0",
     "eslint-plugin-babel": "^2.1.1",
-    "inquirer": "^0.11.0",
     "loud-rejection": "^1.0.0",
     "nodemon": "^1.8.0",
-    "sander": "^0.4.0",
-    "source-map-support": "^0.3.3",
-    "tildify": "^1.1.2"
+    "sander": "^0.4.0"
   },
   "eslintConfig": {
     "extends": "exhibit"

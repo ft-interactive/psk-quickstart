@@ -1,49 +1,18 @@
-import loudRejection from 'loud-rejection';
-import {prompt} from 'inquirer';
-import fs from 'fs';
-import path from 'path';
 import c from 'chalk';
-import tildify from 'tildify';
-import {spawn} from 'child_process';
+import loudRejection from 'loud-rejection';
 import Promise from 'bluebird';
 import sander from 'sander';
+import {spawn} from 'child_process';
 
 loudRejection();
 
-prompt([{
-  name: 'projectName',
-  message: 'Where do you want to create your project? (e.g. "my-project")',
-  validate: input => {
-    if (!/^[0-9a-zA-Z ... ]+$/.test(input)) {
-      return 'Please enter a valid filename (no weird characters)';
-    }
-    if (fs.existsSync(path.resolve(input))) {
-      return 'Something already exists here! ' + c.cyan(tildify(path.resolve(input)));
-    }
-    return true;
-  },
-}, {
-  name: 'confirmed',
-  type: 'confirm',
-  message: ({projectName}) => `Please confirm: ${c.cyan(tildify(path.resolve(projectName)))}`,
-}], Promise.coroutine(function *({confirmed, projectName}) {
-  if (!confirmed) {
-    console.log('OK, exiting.');
-    process.exit(0);
+Promise.coroutine(function *() {
+  const files = (yield sander.readdir(process.cwd())).filter(file => file !== '.DS_Store');
+  if (files.length) {
+    console.log(c.red('\nThis directory is not empty!'));
+    console.log('\nPlease ' + c.cyan('cd') + ' into an empty directory and try again.');
+    process.exit(1);
   }
-
-  const projectPath = path.resolve(projectName);
-  console.assert(projectPath.length);
-  const projectPathRelative = path.relative(process.cwd(), projectPath);
-
-  say(`Creating directory: ${projectPathRelative}`);
-  yield sander.mkdirp(projectPath);
-  tick();
-
-  // change directory
-  say(`cd'ing into directory: ${projectPathRelative}`);
-  process.chdir(projectPath);
-  tick();
 
   say(`Downloading latest project-starter-kit from Github...`);
   yield run(
@@ -74,11 +43,10 @@ prompt([{
   tick();
 
   console.log(
-    '\n\n' + c.green('YOUR NEXT STEPS:') +
-    '\n\n' + c.blue(' > ') + c.white('cd ' + projectPathRelative) +
+    '\n\n' + c.green('Now start the development server:') +
     '\n' + c.blue(' > ') + c.white('npm start')
   );
-}));
+})();
 
 function say(message) {
   console.log(c.magenta(`\n\n${message}`));
