@@ -7,7 +7,7 @@ import {spawn} from 'child_process';
 loudRejection();
 
 Promise.coroutine(function *() {
-  const files = (yield sander.readdir(process.cwd())).filter(file => file !== '.DS_Store');
+  const files = (yield sander.readdir(process.cwd())).filter(file => file !== '.DS_Store' && file !== '.git');
   if (files.length) {
     console.log(c.red('\nThis directory is not empty!'));
     console.log('\nPlease ' + c.cyan('cd') + ' into an empty directory and try again.');

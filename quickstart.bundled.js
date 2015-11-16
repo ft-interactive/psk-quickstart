@@ -11022,7 +11022,7 @@ var _child_process = require('child_process');
 
 _bluebird2['default'].coroutine(function* () {
   var files = (yield _sander2['default'].readdir(process.cwd())).filter(function (file) {
-    return file !== '.DS_Store';
+    return file !== '.DS_Store' && file !== '.git';
   });
   if (files.length) {
     console.log(_chalk2['default'].red('\nThis directory is not empty!'));
