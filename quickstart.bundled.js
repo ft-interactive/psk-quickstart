@@ -74,41 +74,53 @@ Object.defineProperty(module, 'exports', {
 },{}],3:[function(require,module,exports){
 module.exports = balanced;
 function balanced(a, b, str) {
-  var bal = 0;
-  var m = {};
-  var ended = false;
+  var r = range(a, b, str);
 
-  for (var i = 0; i < str.length; i++) {
-    if (a == str.substr(i, a.length)) {
-      if (!('start' in m)) m.start = i;
-      bal++;
-    }
-    else if (b == str.substr(i, b.length) && 'start' in m) {
-      ended = true;
-      bal--;
-      if (!bal) {
-        m.end = i;
-        m.pre = str.substr(0, m.start);
-        m.body = (m.end - m.start > 1)
-          ? str.substring(m.start + a.length, m.end)
-          : '';
-        m.post = str.slice(m.end + b.length);
-        return m;
+  return r && {
+    start: r[0],
+    end: r[1],
+    pre: str.slice(0, r[0]),
+    body: str.slice(r[0] + a.length, r[1]),
+    post: str.slice(r[1] + b.length)
+  };
+}
+
+balanced.range = range;
+function range(a, b, str) {
+  var begs, beg, left, right, result;
+  var ai = str.indexOf(a);
+  var bi = str.indexOf(b, ai + 1);
+  var i = ai;
+
+  if (ai >= 0 && bi > 0) {
+    begs = [];
+    left = str.length;
+
+    while (i < str.length && i >= 0 && ! result) {
+      if (i == ai) {
+        begs.push(i);
+        ai = str.indexOf(a, i + 1);
+      } else if (begs.length == 1) {
+        result = [ begs.pop(), bi ];
+      } else {
+        beg = begs.pop();
+        if (beg < left) {
+          left = beg;
+          right = bi;
+        }
+
+        bi = str.indexOf(b, i + 1);
       }
+
+      i = ai < bi && ai >= 0 ? ai : bi;
+    }
+
+    if (begs.length) {
+      result = [ left, right ];
     }
   }
 
-  // if we opened more than we closed, find the one we closed
-  if (bal && ended) {
-    var start = m.start + a.length;
-    m = balanced(a, b, str.substr(start));
-    if (m) {
-      m.start += start;
-      m.end += start;
-      m.pre = str.slice(0, start) + m.pre;
-    }
-    return m;
-  }
+  return result;
 }
 
 },{}],4:[function(require,module,exports){
@@ -137,7 +149,7 @@ function balanced(a, b, str) {
  * 
  */
 /**
- * bluebird build version 3.0.2
+ * bluebird build version 3.0.6
  * Features enabled: core, race, call_get, generators, map, nodeify, promisify, props, reduce, settle, some, using, timers, filter, any, each
 */
 !function(e){if("object"==typeof exports&&"undefined"!=typeof module)module.exports=e();else if("function"==typeof define&&define.amd)define([],e);else{var f;"undefined"!=typeof window?f=window:"undefined"!=typeof global?f=global:"undefined"!=typeof self&&(f=self),f.Promise=e()}}(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof _dereq_=="function"&&_dereq_;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof _dereq_=="function"&&_dereq_;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(_dereq_,module,exports){
@@ -184,6 +196,10 @@ function Async() {
     this._schedule =
         schedule.isStatic ? schedule(this.drainQueues) : schedule;
 }
+
+Async.prototype.enableTrampoline = function() {
+    this._trampolineEnabled = true;
+};
 
 Async.prototype.disableTrampolineIfNecessary = function() {
     if (util.hasDevTools) {
@@ -704,7 +720,7 @@ var contextStack = [];
 
 Promise.prototype._promiseCreated = function() {};
 Promise.prototype._pushContext = function() {};
-Promise.prototype._popContext = function() {return 0;};
+Promise.prototype._popContext = function() {return null;};
 Promise._peekContext = Promise.prototype._peekContext = function() {};
 
 function Context() {
@@ -712,7 +728,7 @@ function Context() {
 }
 Context.prototype._pushContext = function () {
     if (this._trace !== undefined) {
-        this._trace._promisesCreated = 0;
+        this._trace._promiseCreated = null;
         contextStack.push(this._trace);
     }
 };
@@ -720,11 +736,11 @@ Context.prototype._pushContext = function () {
 Context.prototype._popContext = function () {
     if (this._trace !== undefined) {
         var trace = contextStack.pop();
-        var ret = trace._promisesCreated;
-        trace._promisesCreated = 0;
+        var ret = trace._promiseCreated;
+        trace._promiseCreated = null;
         return ret;
     }
-    return 0;
+    return null;
 };
 
 function createContext() {
@@ -740,14 +756,28 @@ function peekContext() {
 }
 Context.CapturedTrace = null;
 Context.create = createContext;
+Context.deactivateLongStackTraces = function() {};
 Context.activateLongStackTraces = function() {
+    var Promise_pushContext = Promise.prototype._pushContext;
+    var Promise_popContext = Promise.prototype._popContext;
+    var Promise_PeekContext = Promise._peekContext;
+    var Promise_peekContext = Promise.prototype._peekContext;
+    var Promise_promiseCreated = Promise.prototype._promiseCreated;
+    Context.deactivateLongStackTraces = function() {
+        Promise.prototype._pushContext = Promise_pushContext;
+        Promise.prototype._popContext = Promise_popContext;
+        Promise._peekContext = Promise_PeekContext;
+        Promise.prototype._peekContext = Promise_peekContext;
+        Promise.prototype._promiseCreated = Promise_promiseCreated;
+        longStackTraces = false;
+    };
     longStackTraces = true;
     Promise.prototype._pushContext = Context.prototype._pushContext;
     Promise.prototype._popContext = Context.prototype._popContext;
     Promise._peekContext = Promise.prototype._peekContext = peekContext;
     Promise.prototype._promiseCreated = function() {
         var ctx = this._peekContext();
-        if (ctx) ctx._promisesCreated++;
+        if (ctx && ctx._promiseCreated == null) ctx._promiseCreated = this;
     };
 };
 return Context;
@@ -769,8 +799,10 @@ var stackFramePattern = null;
 var formatStack = null;
 var indentStackFrames = false;
 var printWarning;
-var debugging =!!(true || util.env("BLUEBIRD_DEBUG") ||
-                               util.env("NODE_ENV") === "development");
+var debugging = !!(util.env("BLUEBIRD_DEBUG") != 0 &&
+                        (true ||
+                         util.env("BLUEBIRD_DEBUG") ||
+                         util.env("NODE_ENV") === "development"));
 var warnings = !!(util.env("BLUEBIRD_WARNINGS") != 0 &&
     (debugging || util.env("BLUEBIRD_WARNINGS")));
 var longStackTraces = !!(util.env("BLUEBIRD_LONG_STACK_TRACES") != 0 &&
@@ -830,8 +862,8 @@ Promise.prototype._isRejectionUnhandled = function () {
     return (this._bitField & 1048576) > 0;
 };
 
-Promise.prototype._warn = function(message, shouldUseOwnTrace) {
-    return warn(message, shouldUseOwnTrace, this);
+Promise.prototype._warn = function(message, shouldUseOwnTrace, promise) {
+    return warn(message, shouldUseOwnTrace, promise || this);
 };
 
 Promise.onPossiblyUnhandledRejection = function (fn) {
@@ -848,12 +880,25 @@ Promise.onUnhandledRejectionHandled = function (fn) {
                                  : undefined;
 };
 
+var disableLongStackTraces = function() {};
 Promise.longStackTraces = function () {
     if (async.haveItemsQueued() && !config.longStackTraces) {
         throw new Error("cannot enable long stack traces after promises have been created\u000a\u000a    See http://goo.gl/MqrFmX\u000a");
     }
     if (!config.longStackTraces && longStackTracesIsSupported()) {
+        var Promise_captureStackTrace = Promise.prototype._captureStackTrace;
+        var Promise_attachExtraTrace = Promise.prototype._attachExtraTrace;
         config.longStackTraces = true;
+        disableLongStackTraces = function() {
+            if (async.haveItemsQueued() && !config.longStackTraces) {
+                throw new Error("cannot enable long stack traces after promises have been created\u000a\u000a    See http://goo.gl/MqrFmX\u000a");
+            }
+            Promise.prototype._captureStackTrace = Promise_captureStackTrace;
+            Promise.prototype._attachExtraTrace = Promise_attachExtraTrace;
+            Context.deactivateLongStackTraces();
+            async.enableTrampoline();
+            config.longStackTraces = false;
+        };
         Promise.prototype._captureStackTrace = longStackTracesCaptureStackTrace;
         Promise.prototype._attachExtraTrace = longStackTracesAttachExtraTrace;
         Context.activateLongStackTraces();
@@ -867,8 +912,12 @@ Promise.hasLongStackTraces = function () {
 
 Promise.config = function(opts) {
     opts = Object(opts);
-    if ("longStackTraces" in opts && opts.longStackTraces) {
-        Promise.longStackTraces();
+    if ("longStackTraces" in opts) {
+        if (opts.longStackTraces) {
+            Promise.longStackTraces();
+        } else if (!opts.longStackTraces && Promise.hasLongStackTraces()) {
+            disableLongStackTraces();
+        }
     }
     if ("warnings" in opts) {
         config.warnings = !!opts.warnings;
@@ -1010,14 +1059,14 @@ function longStackTracesAttachExtraTrace(error, ignoreSelf) {
     }
 }
 
-function checkForgottenReturns(returnValue, promisesCreated, name, promise) {
+function checkForgottenReturns(returnValue, promiseCreated, name, promise) {
     if (returnValue === undefined &&
-        promisesCreated > 0 &&
+        promiseCreated !== null &&
         config.longStackTraces &&
         config.warnings) {
         var msg = "a promise was created in a " + name +
             " handler but was not returned from it";
-        promise._warn(msg);
+        promise._warn(msg, true, promiseCreated);
     }
 }
 
@@ -1506,7 +1555,7 @@ if (typeof console !== "undefined" && typeof console.warn !== "undefined") {
     if (util.isNode && process.stderr.isTTY) {
         printWarning = function(message, isSoft) {
             var color = isSoft ? "\u001b[33m" : "\u001b[31m";
-            process.stderr.write(color + message + "\u001b[0m\n");
+            console.warn(color + message + "\u001b[0m\n");
         };
     } else if (!util.isNode && typeof (new Error().stack) === "string") {
         printWarning = function(message, isSoft) {
@@ -2353,10 +2402,10 @@ MappingPromiseArray.prototype._promiseFulfilled = function (value, index) {
         var receiver = promise._boundValue();
         promise._pushContext();
         var ret = tryCatch(callback).call(receiver, value, index, length);
-        var promisesCreated = promise._popContext();
+        var promiseCreated = promise._popContext();
         debug.checkForgottenReturns(
             ret,
-            promisesCreated,
+            promiseCreated,
             preservedValues !== null ? "Promise.filter" : "Promise.map",
             promise
         );
@@ -2464,7 +2513,9 @@ Promise.method = function (fn) {
         ret._captureStackTrace();
         ret._pushContext();
         var value = tryCatch(fn).apply(this, arguments);
-        ret._popContext();
+        var promiseCreated = ret._popContext();
+        debug.checkForgottenReturns(
+            value, promiseCreated, "Promise.method", ret);
         ret._resolveFromSyncValue(value);
         return ret;
     };
@@ -2487,7 +2538,9 @@ Promise.attempt = Promise["try"] = function (fn) {
     } else {
         value = tryCatch(fn)();
     }
-    ret._popContext();
+    var promiseCreated = ret._popContext();
+    debug.checkForgottenReturns(
+        value, promiseCreated, "Promise.try", ret);
     ret._resolveFromSyncValue(value);
     return ret;
 };
@@ -2803,6 +2856,7 @@ Promise.cast = function (obj) {
     var ret = tryConvertToPromise(obj);
     if (!(ret instanceof Promise)) {
         ret = new Promise(INTERNAL);
+        ret._captureStackTrace();
         ret._setFulfilled();
         ret._rejectionHandler0 = obj;
     }
@@ -3055,10 +3109,11 @@ Promise.prototype._resolveCallback = function(value, shouldBind) {
     }
 };
 
-Promise.prototype._rejectCallback = function(reason, synchronous) {
+Promise.prototype._rejectCallback =
+function(reason, synchronous, ignoreNonErrorWarnings) {
     var trace = util.ensureErrorObject(reason);
     var hasStack = trace === reason;
-    if (!hasStack && debug.warnings()) {
+    if (!hasStack && !ignoreNonErrorWarnings && debug.warnings()) {
         var message = "a promise was rejected with a non-error: " +
             util.classString(reason);
         this._warn(message, true);
@@ -3103,7 +3158,7 @@ Promise.prototype._settlePromiseFromHandler = function (
     } else {
         x = tryCatch(handler).call(receiver, value);
     }
-    var promisesCreatedDuringHandlerInvocation = promise._popContext();
+    var promiseCreated = promise._popContext();
     bitField = promise._bitField;
     if (((bitField & 65536) !== 0)) return;
 
@@ -3113,13 +3168,7 @@ Promise.prototype._settlePromiseFromHandler = function (
         var err = x === promise ? makeSelfResolutionError() : x.e;
         promise._rejectCallback(err, false);
     } else {
-        if (x === undefined &&
-            promisesCreatedDuringHandlerInvocation > 0 &&
-            debug.longStackTraces() &&
-            debug.warnings()) {
-            promise._warn("a promise was created in a handler but " +
-                "none were returned from it", true);
-        }
+        debug.checkForgottenReturns(x, promiseCreated, "",  promise);
         promise._resolveCallback(x);
     }
 };
@@ -3735,7 +3784,7 @@ function(callback, receiver, originalName, fn, _, multiArgs) {
                 [CodeForSwitchCase]                                          \n\
             }                                                                \n\
             if (ret === errorObj) {                                          \n\
-                promise._rejectCallback(maybeWrapAsError(ret.e), true);      \n\
+                promise._rejectCallback(maybeWrapAsError(ret.e), true, true);\n\
             }                                                                \n\
             if (!promise._isFateSealed()) promise._setAsyncGuaranteed();     \n\
             return promise;                                                  \n\
@@ -3786,7 +3835,7 @@ function makeNodePromisifiedClosure(callback, receiver, _, fn, __, multiArgs) {
         try {
             cb.apply(_receiver, withAppended(arguments, fn));
         } catch(e) {
-            promise._rejectCallback(maybeWrapAsError(e), true);
+            promise._rejectCallback(maybeWrapAsError(e), true, true);
         }
         if (!promise._isFateSealed()) promise._setAsyncGuaranteed();
         return promise;
@@ -4293,10 +4342,10 @@ function gotValue(value) {
     if (ret instanceof Promise) {
         array._currentCancellable = ret;
     }
-    var promisesCreated = promise._popContext();
+    var promiseCreated = promise._popContext();
     debug.checkForgottenReturns(
         ret,
-        promisesCreated,
+        promiseCreated,
         array._eachValues !== undefined ? "Promise.each" : "Promise.reduce",
         promise
     );
@@ -4697,7 +4746,7 @@ function doThenable(x, then, context) {
     synchronous = false;
 
     if (promise && result === errorObj) {
-        promise._rejectCallback(result.e, true);
+        promise._rejectCallback(result.e, true, true);
         promise = null;
     }
 
@@ -4709,7 +4758,7 @@ function doThenable(x, then, context) {
 
     function reject(reason) {
         if (!promise) return;
-        promise._rejectCallback(reason, synchronous);
+        promise._rejectCallback(reason, synchronous, true);
         promise = null;
     }
     return ret;
@@ -4724,7 +4773,7 @@ module.exports = function(Promise, INTERNAL) {
 var util = _dereq_("./util");
 var TimeoutError = Promise.TimeoutError;
 
-var afterTimeout = function (promise, message) {
+var afterTimeout = function (promise, message, parent) {
     if (!promise.isPending()) return;
     var err;
     if (typeof message !== "string") {
@@ -4739,6 +4788,7 @@ var afterTimeout = function (promise, message) {
     util.markAsOriginatingFromRejection(err);
     promise._attachExtraTrace(err);
     promise._reject(err);
+    parent.cancel();
 };
 
 var afterValue = function(value) { return delay(+this).thenReturn(value); };
@@ -4775,9 +4825,10 @@ function failureClear(reason) {
 
 Promise.prototype.timeout = function (ms, message) {
     ms = +ms;
-    var ret = this.then();
+    var parent = this.then();
+    var ret = parent.then();
     var handle = setTimeout(function timeoutTimeout() {
-        afterTimeout(ret, message);
+        afterTimeout(ret, message, parent);
     }, ms);
     return ret._then(successClear, failureClear, undefined, handle, undefined);
 };
@@ -4969,9 +5020,9 @@ module.exports = function (Promise, apiRejection, tryConvertToPromise,
                 fn = tryCatch(fn);
                 var ret = spreadArgs
                     ? fn.apply(undefined, inspections) : fn(inspections);
-                var promisesCreated = promise._popContext();
+                var promiseCreated = promise._popContext();
                 debug.checkForgottenReturns(
-                    ret, promisesCreated, "Promise.using", promise);
+                    ret, promiseCreated, "Promise.using", promise);
                 return ret;
             });
 
@@ -5670,7 +5721,7 @@ module.exports.hasColor = hasAnsi;
 module.exports.stripColor = stripAnsi;
 module.exports.supportsColor = supportsColor;
 
-},{"ansi-styles":2,"escape-string-regexp":8,"has-ansi":15,"strip-ansi":26,"supports-color":27}],7:[function(require,module,exports){
+},{"ansi-styles":2,"escape-string-regexp":8,"has-ansi":12,"strip-ansi":29,"supports-color":30}],7:[function(require,module,exports){
 module.exports = function (xs, fn) {
     var res = [];
     for (var i = 0; i < xs.length; i++) {
@@ -5945,7 +5996,7 @@ function childrenIgnored (self, path) {
   })
 }
 
-},{"minimatch":19,"path":undefined,"path-is-absolute":22}],10:[function(require,module,exports){
+},{"minimatch":17,"path":undefined,"path-is-absolute":20}],10:[function(require,module,exports){
 // Approach:
 //
 // 1. Get the minimatch set
@@ -6699,7 +6750,7 @@ Glob.prototype._stat2 = function (f, abs, er, stat, cb) {
   return cb(null, c, stat)
 }
 
-},{"./common.js":9,"./sync.js":11,"assert":undefined,"events":undefined,"fs":undefined,"inflight":16,"inherits":17,"minimatch":19,"once":21,"path":undefined,"path-is-absolute":22,"util":undefined}],11:[function(require,module,exports){
+},{"./common.js":9,"./sync.js":11,"assert":undefined,"events":undefined,"fs":undefined,"inflight":13,"inherits":14,"minimatch":17,"once":19,"path":undefined,"path-is-absolute":20,"util":undefined}],11:[function(require,module,exports){
 module.exports = globSync
 globSync.GlobSync = GlobSync
 
@@ -7161,445 +7212,13 @@ GlobSync.prototype._makeAbs = function (f) {
   return common.makeAbs(this, f)
 }
 
-},{"./common.js":9,"./glob.js":10,"assert":undefined,"fs":undefined,"minimatch":19,"path":undefined,"path-is-absolute":22,"util":undefined}],12:[function(require,module,exports){
-(function (__filename,__dirname){
-// eeeeeevvvvviiiiiiillllll
-// more evil than monkey-patching the native builtin?
-// Not sure.
-
-var mod = require("module")
-var pre = '(function (exports, require, module, __filename, __dirname) { '
-var post = '});'
-var src = pre + process.binding('natives').fs + post
-var vm = require('vm')
-var fn = vm.runInThisContext(src)
-fn(exports, require, module, __filename, __dirname)
-
-}).call(this,"/Users/callum.locke/code/ft/psk-quickstart/node_modules/graceful-fs/fs.js","/Users/callum.locke/code/ft/psk-quickstart/node_modules/graceful-fs")
-},{"module":undefined,"vm":undefined}],13:[function(require,module,exports){
-// Monkey-patching the fs module.
-// It's ugly, but there is simply no other way to do this.
-var fs = module.exports = require('./fs.js')
-
-var assert = require('assert')
-
-// fix up some busted stuff, mostly on windows and old nodes
-require('./polyfills.js')
-
-var util = require('util')
-
-function noop () {}
-
-var debug = noop
-if (util.debuglog)
-  debug = util.debuglog('gfs')
-else if (/\bgfs\b/i.test(process.env.NODE_DEBUG || ''))
-  debug = function() {
-    var m = util.format.apply(util, arguments)
-    m = 'GFS: ' + m.split(/\n/).join('\nGFS: ')
-    console.error(m)
-  }
-
-if (/\bgfs\b/i.test(process.env.NODE_DEBUG || '')) {
-  process.on('exit', function() {
-    debug('fds', fds)
-    debug(queue)
-    assert.equal(queue.length, 0)
-  })
-}
-
-
-var originalOpen = fs.open
-fs.open = open
-
-function open(path, flags, mode, cb) {
-  if (typeof mode === "function") cb = mode, mode = null
-  if (typeof cb !== "function") cb = noop
-  new OpenReq(path, flags, mode, cb)
-}
-
-function OpenReq(path, flags, mode, cb) {
-  this.path = path
-  this.flags = flags
-  this.mode = mode
-  this.cb = cb
-  Req.call(this)
-}
-
-util.inherits(OpenReq, Req)
-
-OpenReq.prototype.process = function() {
-  originalOpen.call(fs, this.path, this.flags, this.mode, this.done)
-}
-
-var fds = {}
-OpenReq.prototype.done = function(er, fd) {
-  debug('open done', er, fd)
-  if (fd)
-    fds['fd' + fd] = this.path
-  Req.prototype.done.call(this, er, fd)
-}
-
-
-var originalReaddir = fs.readdir
-fs.readdir = readdir
-
-function readdir(path, cb) {
-  if (typeof cb !== "function") cb = noop
-  new ReaddirReq(path, cb)
-}
-
-function ReaddirReq(path, cb) {
-  this.path = path
-  this.cb = cb
-  Req.call(this)
-}
-
-util.inherits(ReaddirReq, Req)
-
-ReaddirReq.prototype.process = function() {
-  originalReaddir.call(fs, this.path, this.done)
-}
-
-ReaddirReq.prototype.done = function(er, files) {
-  if (files && files.sort)
-    files = files.sort()
-  Req.prototype.done.call(this, er, files)
-  onclose()
-}
-
-
-var originalClose = fs.close
-fs.close = close
-
-function close (fd, cb) {
-  debug('close', fd)
-  if (typeof cb !== "function") cb = noop
-  delete fds['fd' + fd]
-  originalClose.call(fs, fd, function(er) {
-    onclose()
-    cb(er)
-  })
-}
-
-
-var originalCloseSync = fs.closeSync
-fs.closeSync = closeSync
-
-function closeSync (fd) {
-  try {
-    return originalCloseSync(fd)
-  } finally {
-    onclose()
-  }
-}
-
-
-// Req class
-function Req () {
-  // start processing
-  this.done = this.done.bind(this)
-  this.failures = 0
-  this.process()
-}
-
-Req.prototype.done = function (er, result) {
-  var tryAgain = false
-  if (er) {
-    var code = er.code
-    var tryAgain = code === "EMFILE" || code === "ENFILE"
-    if (process.platform === "win32")
-      tryAgain = tryAgain || code === "OK"
-  }
-
-  if (tryAgain) {
-    this.failures ++
-    enqueue(this)
-  } else {
-    var cb = this.cb
-    cb(er, result)
-  }
-}
-
-var queue = []
-
-function enqueue(req) {
-  queue.push(req)
-  debug('enqueue %d %s', queue.length, req.constructor.name, req)
-}
-
-function onclose() {
-  var req = queue.shift()
-  if (req) {
-    debug('process', req.constructor.name, req)
-    req.process()
-  }
-}
-
-},{"./fs.js":12,"./polyfills.js":14,"assert":undefined,"util":undefined}],14:[function(require,module,exports){
-var fs = require('./fs.js')
-var constants = require('constants')
-
-var origCwd = process.cwd
-var cwd = null
-process.cwd = function() {
-  if (!cwd)
-    cwd = origCwd.call(process)
-  return cwd
-}
-var chdir = process.chdir
-process.chdir = function(d) {
-  cwd = null
-  chdir.call(process, d)
-}
-
-// (re-)implement some things that are known busted or missing.
-
-// lchmod, broken prior to 0.6.2
-// back-port the fix here.
-if (constants.hasOwnProperty('O_SYMLINK') &&
-    process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
-  fs.lchmod = function (path, mode, callback) {
-    callback = callback || noop
-    fs.open( path
-           , constants.O_WRONLY | constants.O_SYMLINK
-           , mode
-           , function (err, fd) {
-      if (err) {
-        callback(err)
-        return
-      }
-      // prefer to return the chmod error, if one occurs,
-      // but still try to close, and report closing errors if they occur.
-      fs.fchmod(fd, mode, function (err) {
-        fs.close(fd, function(err2) {
-          callback(err || err2)
-        })
-      })
-    })
-  }
-
-  fs.lchmodSync = function (path, mode) {
-    var fd = fs.openSync(path, constants.O_WRONLY | constants.O_SYMLINK, mode)
-
-    // prefer to return the chmod error, if one occurs,
-    // but still try to close, and report closing errors if they occur.
-    var err, err2
-    try {
-      var ret = fs.fchmodSync(fd, mode)
-    } catch (er) {
-      err = er
-    }
-    try {
-      fs.closeSync(fd)
-    } catch (er) {
-      err2 = er
-    }
-    if (err || err2) throw (err || err2)
-    return ret
-  }
-}
-
-
-// lutimes implementation, or no-op
-if (!fs.lutimes) {
-  if (constants.hasOwnProperty("O_SYMLINK")) {
-    fs.lutimes = function (path, at, mt, cb) {
-      fs.open(path, constants.O_SYMLINK, function (er, fd) {
-        cb = cb || noop
-        if (er) return cb(er)
-        fs.futimes(fd, at, mt, function (er) {
-          fs.close(fd, function (er2) {
-            return cb(er || er2)
-          })
-        })
-      })
-    }
-
-    fs.lutimesSync = function (path, at, mt) {
-      var fd = fs.openSync(path, constants.O_SYMLINK)
-        , err
-        , err2
-        , ret
-
-      try {
-        var ret = fs.futimesSync(fd, at, mt)
-      } catch (er) {
-        err = er
-      }
-      try {
-        fs.closeSync(fd)
-      } catch (er) {
-        err2 = er
-      }
-      if (err || err2) throw (err || err2)
-      return ret
-    }
-
-  } else if (fs.utimensat && constants.hasOwnProperty("AT_SYMLINK_NOFOLLOW")) {
-    // maybe utimensat will be bound soonish?
-    fs.lutimes = function (path, at, mt, cb) {
-      fs.utimensat(path, at, mt, constants.AT_SYMLINK_NOFOLLOW, cb)
-    }
-
-    fs.lutimesSync = function (path, at, mt) {
-      return fs.utimensatSync(path, at, mt, constants.AT_SYMLINK_NOFOLLOW)
-    }
-
-  } else {
-    fs.lutimes = function (_a, _b, _c, cb) { process.nextTick(cb) }
-    fs.lutimesSync = function () {}
-  }
-}
-
-
-// https://github.com/isaacs/node-graceful-fs/issues/4
-// Chown should not fail on einval or eperm if non-root.
-// It should not fail on enosys ever, as this just indicates
-// that a fs doesn't support the intended operation.
-
-fs.chown = chownFix(fs.chown)
-fs.fchown = chownFix(fs.fchown)
-fs.lchown = chownFix(fs.lchown)
-
-fs.chmod = chownFix(fs.chmod)
-fs.fchmod = chownFix(fs.fchmod)
-fs.lchmod = chownFix(fs.lchmod)
-
-fs.chownSync = chownFixSync(fs.chownSync)
-fs.fchownSync = chownFixSync(fs.fchownSync)
-fs.lchownSync = chownFixSync(fs.lchownSync)
-
-fs.chmodSync = chownFix(fs.chmodSync)
-fs.fchmodSync = chownFix(fs.fchmodSync)
-fs.lchmodSync = chownFix(fs.lchmodSync)
-
-function chownFix (orig) {
-  if (!orig) return orig
-  return function (target, uid, gid, cb) {
-    return orig.call(fs, target, uid, gid, function (er, res) {
-      if (chownErOk(er)) er = null
-      cb(er, res)
-    })
-  }
-}
-
-function chownFixSync (orig) {
-  if (!orig) return orig
-  return function (target, uid, gid) {
-    try {
-      return orig.call(fs, target, uid, gid)
-    } catch (er) {
-      if (!chownErOk(er)) throw er
-    }
-  }
-}
-
-// ENOSYS means that the fs doesn't support the op. Just ignore
-// that, because it doesn't matter.
-//
-// if there's no getuid, or if getuid() is something other
-// than 0, and the error is EINVAL or EPERM, then just ignore
-// it.
-//
-// This specific case is a silent failure in cp, install, tar,
-// and most other unix tools that manage permissions.
-//
-// When running as root, or if other types of errors are
-// encountered, then it's strict.
-function chownErOk (er) {
-  if (!er)
-    return true
-
-  if (er.code === "ENOSYS")
-    return true
-
-  var nonroot = !process.getuid || process.getuid() !== 0
-  if (nonroot) {
-    if (er.code === "EINVAL" || er.code === "EPERM")
-      return true
-  }
-
-  return false
-}
-
-
-// if lchmod/lchown do not exist, then make them no-ops
-if (!fs.lchmod) {
-  fs.lchmod = function (path, mode, cb) {
-    process.nextTick(cb)
-  }
-  fs.lchmodSync = function () {}
-}
-if (!fs.lchown) {
-  fs.lchown = function (path, uid, gid, cb) {
-    process.nextTick(cb)
-  }
-  fs.lchownSync = function () {}
-}
-
-
-
-// on Windows, A/V software can lock the directory, causing this
-// to fail with an EACCES or EPERM if the directory contains newly
-// created files.  Try again on failure, for up to 1 second.
-if (process.platform === "win32") {
-  var rename_ = fs.rename
-  fs.rename = function rename (from, to, cb) {
-    var start = Date.now()
-    rename_(from, to, function CB (er) {
-      if (er
-          && (er.code === "EACCES" || er.code === "EPERM")
-          && Date.now() - start < 1000) {
-        return rename_(from, to, CB)
-      }
-      if(cb) cb(er)
-    })
-  }
-}
-
-
-// if read() returns EAGAIN, then just try it again.
-var read = fs.read
-fs.read = function (fd, buffer, offset, length, position, callback_) {
-  var callback
-  if (callback_ && typeof callback_ === 'function') {
-    var eagCounter = 0
-    callback = function (er, _, __) {
-      if (er && er.code === 'EAGAIN' && eagCounter < 10) {
-        eagCounter ++
-        return read.call(fs, fd, buffer, offset, length, position, callback)
-      }
-      callback_.apply(this, arguments)
-    }
-  }
-  return read.call(fs, fd, buffer, offset, length, position, callback)
-}
-
-var readSync = fs.readSync
-fs.readSync = function (fd, buffer, offset, length, position) {
-  var eagCounter = 0
-  while (true) {
-    try {
-      return readSync.call(fs, fd, buffer, offset, length, position)
-    } catch (er) {
-      if (er.code === 'EAGAIN' && eagCounter < 10) {
-        eagCounter ++
-        continue
-      }
-      throw er
-    }
-  }
-}
-
-
-},{"./fs.js":12,"constants":undefined}],15:[function(require,module,exports){
+},{"./common.js":9,"./glob.js":10,"assert":undefined,"fs":undefined,"minimatch":17,"path":undefined,"path-is-absolute":20,"util":undefined}],12:[function(require,module,exports){
 'use strict';
 var ansiRegex = require('ansi-regex');
 var re = new RegExp(ansiRegex().source); // remove the `g` flag
 module.exports = re.test.bind(re);
 
-},{"ansi-regex":1}],16:[function(require,module,exports){
+},{"ansi-regex":1}],13:[function(require,module,exports){
 var wrappy = require('wrappy')
 var reqs = Object.create(null)
 var once = require('once')
@@ -7645,7 +7264,7 @@ function slice (args) {
   return array
 }
 
-},{"once":21,"wrappy":28}],17:[function(require,module,exports){
+},{"once":19,"wrappy":31}],14:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -7670,23 +7289,80 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],18:[function(require,module,exports){
+},{}],15:[function(require,module,exports){
 'use strict';
-module.exports = function () {
-	process.on('unhandledRejection', function (err) {
-		if (err instanceof Error) {
-			console.error(err.stack);
-		} else if (err) {
-			console.error('Promise rejected with value:', err);
-		} else {
-			console.error('Promise rejected no value');
-		}
 
-		process.exit(1);
+// WARNING: This undocumented API is subject to change.
+
+module.exports = function (process) {
+	var unhandledRejections = [];
+
+	process.on('unhandledRejection', function (reason, p) {
+		unhandledRejections.push({reason: reason, promise: p});
+	});
+
+	process.on('rejectionHandled', function (p) {
+		var index = unhandledRejections.reduce(function (result, item, idx) {
+			return (item.promise === p ? idx : result);
+		}, -1);
+
+		unhandledRejections.splice(index, 1);
+	});
+
+	function currentlyUnhandled() {
+		return unhandledRejections.map(function (entry) {
+			return {
+				reason: entry.reason,
+				promise: entry.promise
+			};
+		});
+	}
+
+	return {
+		currentlyUnhandled: currentlyUnhandled
+	};
+};
+
+},{}],16:[function(require,module,exports){
+'use strict';
+var onExit = require('signal-exit');
+var api = require('./api');
+var installed = false;
+
+function outputRejectedMessage(err) {
+	if (err instanceof Error) {
+		console.error(err.stack);
+	} else if (typeof err === 'undefined') {
+		console.error('Promise rejected no value');
+	} else {
+		console.error('Promise rejected with value:', err);
+	}
+}
+
+module.exports = function () {
+	if (installed) {
+		console.trace('WARN: loud rejection called more than once');
+		return;
+	}
+
+	installed = true;
+
+	var tracker = api(process);
+
+	onExit(function () {
+		var unhandledRejections = tracker.currentlyUnhandled();
+
+		if (unhandledRejections.length > 0) {
+			unhandledRejections.forEach(function (x) {
+				outputRejectedMessage(x.reason);
+			});
+
+			process.exitCode = 1;
+		}
 	});
 };
 
-},{}],19:[function(require,module,exports){
+},{"./api":15,"signal-exit":27}],17:[function(require,module,exports){
 module.exports = minimatch
 minimatch.Minimatch = Minimatch
 
@@ -8600,7 +8276,7 @@ function regExpEscape (s) {
   return s.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&')
 }
 
-},{"brace-expansion":5,"path":undefined}],20:[function(require,module,exports){
+},{"brace-expansion":5,"path":undefined}],18:[function(require,module,exports){
 var path = require('path');
 var fs = require('fs');
 var _0777 = parseInt('0777', 8);
@@ -8700,7 +8376,7 @@ mkdirP.sync = function sync (p, opts, made) {
     return made;
 };
 
-},{"fs":undefined,"path":undefined}],21:[function(require,module,exports){
+},{"fs":undefined,"path":undefined}],19:[function(require,module,exports){
 var wrappy = require('wrappy')
 module.exports = wrappy(once)
 
@@ -8723,7 +8399,7 @@ function once (fn) {
   return f
 }
 
-},{"wrappy":28}],22:[function(require,module,exports){
+},{"wrappy":31}],20:[function(require,module,exports){
 'use strict';
 
 function posix(path) {
@@ -8745,7 +8421,7 @@ module.exports = process.platform === 'win32' ? win32 : posix;
 module.exports.posix = posix;
 module.exports.win32 = win32;
 
-},{}],23:[function(require,module,exports){
+},{}],21:[function(require,module,exports){
 module.exports = rimraf
 rimraf.sync = rimrafSync
 
@@ -9080,7 +8756,7 @@ function rmkidsSync (p, options) {
   options.rmdirSync(p, options)
 }
 
-},{"assert":undefined,"fs":undefined,"glob":10,"path":undefined}],24:[function(require,module,exports){
+},{"assert":undefined,"fs":undefined,"glob":10,"path":undefined}],22:[function(require,module,exports){
 'use strict';
 
 var fs = require('graceful-fs');
@@ -9924,7 +9600,7 @@ exports.symlinkOrCopy = symlinkOrCopy$1;
 exports.symlinkOrCopySync = symlinkOrCopySync$1;
 
 
-},{"es6-promise":25,"fs":undefined,"graceful-fs":13,"mkdirp":20,"path":undefined,"rimraf":23}],25:[function(require,module,exports){
+},{"es6-promise":23,"fs":undefined,"graceful-fs":25,"mkdirp":18,"path":undefined,"rimraf":21}],23:[function(require,module,exports){
 /*!
  * @overview es6-promise - a tiny implementation of Promises/A+.
  * @copyright Copyright (c) 2014 Yehuda Katz, Tom Dale, Stefan Penner and contributors (Conversion to ES6 API by Jake Archibald)
@@ -10898,7 +10574,638 @@ exports.symlinkOrCopySync = symlinkOrCopySync$1;
 }).call(this);
 
 
-},{}],26:[function(require,module,exports){
+},{}],24:[function(require,module,exports){
+(function (__filename,__dirname){
+// eeeeeevvvvviiiiiiillllll
+// more evil than monkey-patching the native builtin?
+// Not sure.
+
+var mod = require("module")
+var pre = '(function (exports, require, module, __filename, __dirname) { '
+var post = '});'
+var src = pre + process.binding('natives').fs + post
+var vm = require('vm')
+var fn = vm.runInThisContext(src)
+fn(exports, require, module, __filename, __dirname)
+
+}).call(this,"/Users/callum.locke/code/ft/psk-quickstart/node_modules/sander/node_modules/graceful-fs/fs.js","/Users/callum.locke/code/ft/psk-quickstart/node_modules/sander/node_modules/graceful-fs")
+},{"module":undefined,"vm":undefined}],25:[function(require,module,exports){
+// Monkey-patching the fs module.
+// It's ugly, but there is simply no other way to do this.
+var fs = module.exports = require('./fs.js')
+
+var assert = require('assert')
+
+// fix up some busted stuff, mostly on windows and old nodes
+require('./polyfills.js')
+
+var util = require('util')
+
+function noop () {}
+
+var debug = noop
+if (util.debuglog)
+  debug = util.debuglog('gfs')
+else if (/\bgfs\b/i.test(process.env.NODE_DEBUG || ''))
+  debug = function() {
+    var m = util.format.apply(util, arguments)
+    m = 'GFS: ' + m.split(/\n/).join('\nGFS: ')
+    console.error(m)
+  }
+
+if (/\bgfs\b/i.test(process.env.NODE_DEBUG || '')) {
+  process.on('exit', function() {
+    debug('fds', fds)
+    debug(queue)
+    assert.equal(queue.length, 0)
+  })
+}
+
+
+var originalOpen = fs.open
+fs.open = open
+
+function open(path, flags, mode, cb) {
+  if (typeof mode === "function") cb = mode, mode = null
+  if (typeof cb !== "function") cb = noop
+  new OpenReq(path, flags, mode, cb)
+}
+
+function OpenReq(path, flags, mode, cb) {
+  this.path = path
+  this.flags = flags
+  this.mode = mode
+  this.cb = cb
+  Req.call(this)
+}
+
+util.inherits(OpenReq, Req)
+
+OpenReq.prototype.process = function() {
+  originalOpen.call(fs, this.path, this.flags, this.mode, this.done)
+}
+
+var fds = {}
+OpenReq.prototype.done = function(er, fd) {
+  debug('open done', er, fd)
+  if (fd)
+    fds['fd' + fd] = this.path
+  Req.prototype.done.call(this, er, fd)
+}
+
+
+var originalReaddir = fs.readdir
+fs.readdir = readdir
+
+function readdir(path, cb) {
+  if (typeof cb !== "function") cb = noop
+  new ReaddirReq(path, cb)
+}
+
+function ReaddirReq(path, cb) {
+  this.path = path
+  this.cb = cb
+  Req.call(this)
+}
+
+util.inherits(ReaddirReq, Req)
+
+ReaddirReq.prototype.process = function() {
+  originalReaddir.call(fs, this.path, this.done)
+}
+
+ReaddirReq.prototype.done = function(er, files) {
+  if (files && files.sort)
+    files = files.sort()
+  Req.prototype.done.call(this, er, files)
+  onclose()
+}
+
+
+var originalClose = fs.close
+fs.close = close
+
+function close (fd, cb) {
+  debug('close', fd)
+  if (typeof cb !== "function") cb = noop
+  delete fds['fd' + fd]
+  originalClose.call(fs, fd, function(er) {
+    onclose()
+    cb(er)
+  })
+}
+
+
+var originalCloseSync = fs.closeSync
+fs.closeSync = closeSync
+
+function closeSync (fd) {
+  try {
+    return originalCloseSync(fd)
+  } finally {
+    onclose()
+  }
+}
+
+
+// Req class
+function Req () {
+  // start processing
+  this.done = this.done.bind(this)
+  this.failures = 0
+  this.process()
+}
+
+Req.prototype.done = function (er, result) {
+  var tryAgain = false
+  if (er) {
+    var code = er.code
+    var tryAgain = code === "EMFILE" || code === "ENFILE"
+    if (process.platform === "win32")
+      tryAgain = tryAgain || code === "OK"
+  }
+
+  if (tryAgain) {
+    this.failures ++
+    enqueue(this)
+  } else {
+    var cb = this.cb
+    cb(er, result)
+  }
+}
+
+var queue = []
+
+function enqueue(req) {
+  queue.push(req)
+  debug('enqueue %d %s', queue.length, req.constructor.name, req)
+}
+
+function onclose() {
+  var req = queue.shift()
+  if (req) {
+    debug('process', req.constructor.name, req)
+    req.process()
+  }
+}
+
+},{"./fs.js":24,"./polyfills.js":26,"assert":undefined,"util":undefined}],26:[function(require,module,exports){
+var fs = require('./fs.js')
+var constants = require('constants')
+
+var origCwd = process.cwd
+var cwd = null
+process.cwd = function() {
+  if (!cwd)
+    cwd = origCwd.call(process)
+  return cwd
+}
+var chdir = process.chdir
+process.chdir = function(d) {
+  cwd = null
+  chdir.call(process, d)
+}
+
+// (re-)implement some things that are known busted or missing.
+
+// lchmod, broken prior to 0.6.2
+// back-port the fix here.
+if (constants.hasOwnProperty('O_SYMLINK') &&
+    process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
+  fs.lchmod = function (path, mode, callback) {
+    callback = callback || noop
+    fs.open( path
+           , constants.O_WRONLY | constants.O_SYMLINK
+           , mode
+           , function (err, fd) {
+      if (err) {
+        callback(err)
+        return
+      }
+      // prefer to return the chmod error, if one occurs,
+      // but still try to close, and report closing errors if they occur.
+      fs.fchmod(fd, mode, function (err) {
+        fs.close(fd, function(err2) {
+          callback(err || err2)
+        })
+      })
+    })
+  }
+
+  fs.lchmodSync = function (path, mode) {
+    var fd = fs.openSync(path, constants.O_WRONLY | constants.O_SYMLINK, mode)
+
+    // prefer to return the chmod error, if one occurs,
+    // but still try to close, and report closing errors if they occur.
+    var err, err2
+    try {
+      var ret = fs.fchmodSync(fd, mode)
+    } catch (er) {
+      err = er
+    }
+    try {
+      fs.closeSync(fd)
+    } catch (er) {
+      err2 = er
+    }
+    if (err || err2) throw (err || err2)
+    return ret
+  }
+}
+
+
+// lutimes implementation, or no-op
+if (!fs.lutimes) {
+  if (constants.hasOwnProperty("O_SYMLINK")) {
+    fs.lutimes = function (path, at, mt, cb) {
+      fs.open(path, constants.O_SYMLINK, function (er, fd) {
+        cb = cb || noop
+        if (er) return cb(er)
+        fs.futimes(fd, at, mt, function (er) {
+          fs.close(fd, function (er2) {
+            return cb(er || er2)
+          })
+        })
+      })
+    }
+
+    fs.lutimesSync = function (path, at, mt) {
+      var fd = fs.openSync(path, constants.O_SYMLINK)
+        , err
+        , err2
+        , ret
+
+      try {
+        var ret = fs.futimesSync(fd, at, mt)
+      } catch (er) {
+        err = er
+      }
+      try {
+        fs.closeSync(fd)
+      } catch (er) {
+        err2 = er
+      }
+      if (err || err2) throw (err || err2)
+      return ret
+    }
+
+  } else if (fs.utimensat && constants.hasOwnProperty("AT_SYMLINK_NOFOLLOW")) {
+    // maybe utimensat will be bound soonish?
+    fs.lutimes = function (path, at, mt, cb) {
+      fs.utimensat(path, at, mt, constants.AT_SYMLINK_NOFOLLOW, cb)
+    }
+
+    fs.lutimesSync = function (path, at, mt) {
+      return fs.utimensatSync(path, at, mt, constants.AT_SYMLINK_NOFOLLOW)
+    }
+
+  } else {
+    fs.lutimes = function (_a, _b, _c, cb) { process.nextTick(cb) }
+    fs.lutimesSync = function () {}
+  }
+}
+
+
+// https://github.com/isaacs/node-graceful-fs/issues/4
+// Chown should not fail on einval or eperm if non-root.
+// It should not fail on enosys ever, as this just indicates
+// that a fs doesn't support the intended operation.
+
+fs.chown = chownFix(fs.chown)
+fs.fchown = chownFix(fs.fchown)
+fs.lchown = chownFix(fs.lchown)
+
+fs.chmod = chownFix(fs.chmod)
+fs.fchmod = chownFix(fs.fchmod)
+fs.lchmod = chownFix(fs.lchmod)
+
+fs.chownSync = chownFixSync(fs.chownSync)
+fs.fchownSync = chownFixSync(fs.fchownSync)
+fs.lchownSync = chownFixSync(fs.lchownSync)
+
+fs.chmodSync = chownFix(fs.chmodSync)
+fs.fchmodSync = chownFix(fs.fchmodSync)
+fs.lchmodSync = chownFix(fs.lchmodSync)
+
+function chownFix (orig) {
+  if (!orig) return orig
+  return function (target, uid, gid, cb) {
+    return orig.call(fs, target, uid, gid, function (er, res) {
+      if (chownErOk(er)) er = null
+      cb(er, res)
+    })
+  }
+}
+
+function chownFixSync (orig) {
+  if (!orig) return orig
+  return function (target, uid, gid) {
+    try {
+      return orig.call(fs, target, uid, gid)
+    } catch (er) {
+      if (!chownErOk(er)) throw er
+    }
+  }
+}
+
+// ENOSYS means that the fs doesn't support the op. Just ignore
+// that, because it doesn't matter.
+//
+// if there's no getuid, or if getuid() is something other
+// than 0, and the error is EINVAL or EPERM, then just ignore
+// it.
+//
+// This specific case is a silent failure in cp, install, tar,
+// and most other unix tools that manage permissions.
+//
+// When running as root, or if other types of errors are
+// encountered, then it's strict.
+function chownErOk (er) {
+  if (!er)
+    return true
+
+  if (er.code === "ENOSYS")
+    return true
+
+  var nonroot = !process.getuid || process.getuid() !== 0
+  if (nonroot) {
+    if (er.code === "EINVAL" || er.code === "EPERM")
+      return true
+  }
+
+  return false
+}
+
+
+// if lchmod/lchown do not exist, then make them no-ops
+if (!fs.lchmod) {
+  fs.lchmod = function (path, mode, cb) {
+    process.nextTick(cb)
+  }
+  fs.lchmodSync = function () {}
+}
+if (!fs.lchown) {
+  fs.lchown = function (path, uid, gid, cb) {
+    process.nextTick(cb)
+  }
+  fs.lchownSync = function () {}
+}
+
+
+
+// on Windows, A/V software can lock the directory, causing this
+// to fail with an EACCES or EPERM if the directory contains newly
+// created files.  Try again on failure, for up to 1 second.
+if (process.platform === "win32") {
+  var rename_ = fs.rename
+  fs.rename = function rename (from, to, cb) {
+    var start = Date.now()
+    rename_(from, to, function CB (er) {
+      if (er
+          && (er.code === "EACCES" || er.code === "EPERM")
+          && Date.now() - start < 1000) {
+        return rename_(from, to, CB)
+      }
+      if(cb) cb(er)
+    })
+  }
+}
+
+
+// if read() returns EAGAIN, then just try it again.
+var read = fs.read
+fs.read = function (fd, buffer, offset, length, position, callback_) {
+  var callback
+  if (callback_ && typeof callback_ === 'function') {
+    var eagCounter = 0
+    callback = function (er, _, __) {
+      if (er && er.code === 'EAGAIN' && eagCounter < 10) {
+        eagCounter ++
+        return read.call(fs, fd, buffer, offset, length, position, callback)
+      }
+      callback_.apply(this, arguments)
+    }
+  }
+  return read.call(fs, fd, buffer, offset, length, position, callback)
+}
+
+var readSync = fs.readSync
+fs.readSync = function (fd, buffer, offset, length, position) {
+  var eagCounter = 0
+  while (true) {
+    try {
+      return readSync.call(fs, fd, buffer, offset, length, position)
+    } catch (er) {
+      if (er.code === 'EAGAIN' && eagCounter < 10) {
+        eagCounter ++
+        continue
+      }
+      throw er
+    }
+  }
+}
+
+
+},{"./fs.js":24,"constants":undefined}],27:[function(require,module,exports){
+// Note: since nyc uses this module to output coverage, any lines
+// that are in the direct sync flow of nyc's outputCoverage are
+// ignored, since we can never get coverage for them.
+var assert = require('assert')
+var signals = require('./signals.js')
+
+var EE = require('events')
+/* istanbul ignore if */
+if (typeof EE !== 'function') {
+  EE = EE.EventEmitter
+}
+
+var emitter
+if (process.__signal_exit_emitter__) {
+  emitter = process.__signal_exit_emitter__
+} else {
+  emitter = process.__signal_exit_emitter__ = new EE()
+  emitter.count = 0
+  emitter.emitted = {}
+}
+
+module.exports = function (cb, opts) {
+  assert.equal(typeof cb, 'function', 'a callback must be provided for exit handler')
+
+  if (loaded === false) {
+    load()
+  }
+
+  var ev = 'exit'
+  if (opts && opts.alwaysLast) {
+    ev = 'afterexit'
+  }
+
+  var remove = function () {
+    emitter.removeListener(ev, cb)
+    if (emitter.listeners('exit').length === 0 &&
+        emitter.listeners('afterexit').length === 0) {
+      unload()
+    }
+  }
+  emitter.on(ev, cb)
+
+  return remove
+}
+
+module.exports.unload = unload
+function unload () {
+  if (!loaded) {
+    return
+  }
+  loaded = false
+
+  signals.forEach(function (sig) {
+    try {
+      process.removeListener(sig, sigListeners[sig])
+    } catch (er) {}
+  })
+  process.emit = originalProcessEmit
+  process.reallyExit = originalProcessReallyExit
+  emitter.count -= 1
+}
+
+function emit (event, code, signal) {
+  if (emitter.emitted[event]) {
+    return
+  }
+  emitter.emitted[event] = true
+  emitter.emit(event, code, signal)
+}
+
+// { <signal>: <listener fn>, ... }
+var sigListeners = {}
+signals.forEach(function (sig) {
+  sigListeners[sig] = function listener () {
+    // If there are no other listeners, an exit is coming!
+    // Simplest way: remove us and then re-send the signal.
+    // We know that this will kill the process, so we can
+    // safely emit now.
+    var listeners = process.listeners(sig)
+    if (listeners.length === emitter.count) {
+      unload()
+      emit('exit', null, sig)
+      /* istanbul ignore next */
+      emit('afterexit', null, sig)
+      /* istanbul ignore next */
+      process.kill(process.pid, sig)
+    }
+  }
+})
+
+module.exports.signals = function () {
+  return signals
+}
+
+module.exports.load = load
+
+var loaded = false
+
+function load () {
+  if (loaded) {
+    return
+  }
+  loaded = true
+
+  // This is the number of onSignalExit's that are in play.
+  // It's important so that we can count the correct number of
+  // listeners on signals, and don't wait for the other one to
+  // handle it instead of us.
+  emitter.count += 1
+
+  signals = signals.filter(function (sig) {
+    try {
+      process.on(sig, sigListeners[sig])
+      return true
+    } catch (er) {
+      return false
+    }
+  })
+
+  process.emit = processEmit
+  process.reallyExit = processReallyExit
+}
+
+var originalProcessReallyExit = process.reallyExit
+function processReallyExit (code) {
+  process.exitCode = code || 0
+  emit('exit', process.exitCode, null)
+  /* istanbul ignore next */
+  emit('afterexit', process.exitCode, null)
+  /* istanbul ignore next */
+  originalProcessReallyExit.call(process, process.exitCode)
+}
+
+var originalProcessEmit = process.emit
+function processEmit (ev, arg) {
+  if (ev === 'exit') {
+    if (arg !== undefined) {
+      process.exitCode = arg
+    }
+    var ret = originalProcessEmit.apply(this, arguments)
+    emit('exit', process.exitCode, null)
+    /* istanbul ignore next */
+    emit('afterexit', process.exitCode, null)
+    return ret
+  } else {
+    return originalProcessEmit.apply(this, arguments)
+  }
+}
+
+},{"./signals.js":28,"assert":undefined,"events":undefined}],28:[function(require,module,exports){
+// This is not the set of all possible signals.
+//
+// It IS, however, the set of all signals that trigger
+// an exit on either Linux or BSD systems.  Linux is a
+// superset of the signal names supported on BSD, and
+// the unknown signals just fail to register, so we can
+// catch that easily enough.
+//
+// Don't bother with SIGKILL.  It's uncatchable, which
+// means that we can't fire any callbacks anyway.
+//
+// If a user does happen to register a handler on a non-
+// fatal signal like SIGWINCH or something, and then
+// exit, it'll end up firing `process.emit('exit')`, so
+// the handler will be fired anyway.
+
+module.exports = [
+  'SIGABRT',
+  'SIGALRM',
+  'SIGBUS',
+  'SIGFPE',
+  'SIGHUP',
+  'SIGILL',
+  'SIGINT',
+  'SIGIOT',
+  'SIGPIPE',
+  'SIGPROF',
+  'SIGQUIT',
+  'SIGSEGV',
+  'SIGSYS',
+  'SIGTERM',
+  'SIGTRAP',
+  'SIGUSR2',
+  'SIGVTALRM',
+  'SIGXCPU',
+  'SIGXFSZ'
+]
+
+if (process.platform === 'linux') {
+  module.exports.push(
+    'SIGIO',
+    'SIGPOLL',
+    'SIGPWR',
+    'SIGSTKFLT',
+    'SIGUNUSED'
+  )
+}
+
+},{}],29:[function(require,module,exports){
 'use strict';
 var ansiRegex = require('ansi-regex')();
 
@@ -10906,7 +11213,7 @@ module.exports = function (str) {
 	return typeof str === 'string' ? str.replace(ansiRegex, '') : str;
 };
 
-},{"ansi-regex":1}],27:[function(require,module,exports){
+},{"ansi-regex":1}],30:[function(require,module,exports){
 'use strict';
 var argv = process.argv;
 
@@ -10958,7 +11265,7 @@ module.exports = (function () {
 	return false;
 })();
 
-},{}],28:[function(require,module,exports){
+},{}],31:[function(require,module,exports){
 // Returns a wrapper function that returns a wrapped callback
 // The wrapper function should do some stuff, and return a
 // presumably different callback function.
@@ -10993,7 +11300,7 @@ function wrappy (fn, cb) {
   }
 }
 
-},{}],29:[function(require,module,exports){
+},{}],32:[function(require,module,exports){
 'use strict';
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
@@ -11021,13 +11328,34 @@ var _child_process = require('child_process');
 (0, _loudRejection2['default'])();
 
 _bluebird2['default'].coroutine(function* () {
-  var files = (yield _sander2['default'].readdir(process.cwd())).filter(function (file) {
+  var files = yield _sander2['default'].readdir(process.cwd());
+  var hasGit = files.indexOf('.git') > -1;
+
+  // the directory must be more or less empty, otherwise we exit
+  // (to avoid the common mistake of trying to scaffold in the home directory,
+  // or ending up with a frankenstein app)
+  if (files.filter(function (file) {
     return file !== '.DS_Store' && file !== '.git';
-  });
-  if (files.length) {
+  }).length) {
     console.log(_chalk2['default'].red('\nThis directory is not empty!'));
     console.log('\nPlease ' + _chalk2['default'].cyan('cd') + ' into an empty directory and try again.');
     process.exit(1);
+  }
+
+  // if the directory is already git-managed, that is ok providing there are no
+  // uncommitted changes (this covers the scenario where user has deleted all
+  // existing files from an existing project in order to do a 'fresh start'
+  // with the starter kit while retaining history)
+  if (hasGit) {
+    say('This is alreay a git-managed directory; verifying working directory is clean...');
+
+    try {
+      (0, _child_process.execSync)('git diff --exit-code');
+    } catch (error) {
+      console.log(_chalk2['default'].red('\nWorking directory is not clean.'));
+      console.log('Please commit your changes then try running this script again.');
+      process.exit(1);
+    }
   }
 
   say('Downloading latest project-starter-kit from Github...');
@@ -11042,8 +11370,8 @@ _bluebird2['default'].coroutine(function* () {
   yield _bluebird2['default'].all([_sander2['default'].rimraf('docs'), _sander2['default'].unlink('README.md'), _sander2['default'].unlink('psk.zip')]);
   tick();
 
-  say('Running git init and committing the initial files...');
-  yield run('git init');
+  say('Committing initial files...');
+  if (!hasGit) yield run('git init');
   yield run('git add .');
   yield run('git commit -m project-starter-kit');
   tick();
@@ -11087,4 +11415,4 @@ function run(command) {
   });
 }
 
-},{"bluebird":4,"chalk":6,"child_process":undefined,"loud-rejection":18,"sander":24}]},{},[29]);
+},{"bluebird":4,"chalk":6,"child_process":undefined,"loud-rejection":16,"sander":22}]},{},[32]);

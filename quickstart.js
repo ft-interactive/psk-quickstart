@@ -2,16 +2,38 @@ import c from 'chalk';
 import loudRejection from 'loud-rejection';
 import Promise from 'bluebird';
 import sander from 'sander';
-import {spawn} from 'child_process';
+import {spawn, execSync} from 'child_process';
 
 loudRejection();
 
 Promise.coroutine(function *() {
-  const files = (yield sander.readdir(process.cwd())).filter(file => file !== '.DS_Store' && file !== '.git');
-  if (files.length) {
+  const files = yield sander.readdir(process.cwd());
+  const hasGit = (files.indexOf('.git') > -1);
+
+  // the directory must be more or less empty, otherwise we exit
+  // (to avoid the common mistake of trying to scaffold in the home directory,
+  // or ending up with a frankenstein app)
+  if (files.filter(file => file !== '.DS_Store' && file !== '.git').length) {
     console.log(c.red('\nThis directory is not empty!'));
     console.log('\nPlease ' + c.cyan('cd') + ' into an empty directory and try again.');
     process.exit(1);
+  }
+
+  // if the directory is already git-managed, that is ok providing there are no
+  // uncommitted changes (this covers the scenario where user has deleted all
+  // existing files from an existing project in order to do a 'fresh start'
+  // with the starter kit while retaining history)
+  if (hasGit) {
+    say(`This is alreay a git-managed directory; verifying working directory is clean...`);
+
+    try {
+      execSync('git diff --exit-code');
+    }
+    catch (error) {
+      console.log(c.red(`\nWorking directory is not clean.`));
+      console.log('Please commit your changes then try running this script again.');
+      process.exit(1);
+    }
   }
 
   say(`Downloading latest project-starter-kit from Github...`);
@@ -32,8 +54,8 @@ Promise.coroutine(function *() {
   ]);
   tick();
 
-  say(`Running git init and committing the initial files...`);
-  yield run('git init');
+  say(`Committing initial files...`);
+  if (!hasGit) yield run('git init');
   yield run('git add .');
   yield run('git commit -m project-starter-kit');
   tick();
